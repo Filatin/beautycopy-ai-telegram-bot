@@ -1,141 +1,76 @@
-# BeautyCopy — Serverless AI Telegram Bot
+# BeautyCopy — photo input
 
-BeautyCopy is a bilingual Telegram bot that creates e-commerce and social-media content for perfume products. It runs as a serverless Cloudflare Worker and uses Cloudflare Workers AI as its primary generation engine, with Gemini available as an optional fallback.
+Telegram perfume copywriter for Polish and English. Send a bottle photo, confirm/correct
+the detected product, then choose Allegro, Amazon, Instagram, dupes, or a Campaign Pack
+in Luxury, Minimal or Sales style. Choosing the format before sending a photo also works.
 
-> BeautyCopy is exclusively a hobby project created for learning and demonstration purposes. It is not a commercial service.
+## Photo workflow
 
-## What it can generate
+1. Send a photo of ONE perfume bottle with a readable label (JPG, PNG or WebP, up to 5 MB).
+2. Review the identity. Tap **Użyj / Use**, or type the correct full name.
+   Visual matches without a readable label are explicitly tentative and require confirmation.
+   Low-confidence or ambiguous photos require a full name instead of confirmation.
+3. Choose Polish/English, format and campaign tone.
+4. Generate other formats from the saved product, or use **New product** / `/new`.
 
-- Product descriptions for Allegro and online stores in Polish
-- Amazon-ready product descriptions in English
-- Instagram posts with hooks, calls to action and hashtags
-- Fragrance alternative and dupe analyses
-- Structured top, heart and base note profiles
-- A complete **Campaign Pack / Kampania 360°**
+This feature generates TEXT from photos; it does not edit or generate advertising images.
+It does not browse the web or reverse-search images. Review fragrance notes and other
+knowledge-based facts before publishing. Bottle colour alone does not establish the exact
+Le Male variant, concentration, size or authenticity.
 
-### Campaign Pack
+## Implementation
 
-The Campaign Pack turns one perfume name into a coordinated marketing set:
+- Cloudflare Workers AI `@cf/google/gemma-4-26b-a4b-it` performs vision and text generation.
+- The existing optional Gemini key provides a fallback using inline image bytes.
+- SQLite-backed Durable Objects persist a conversation per chat/user/topic.
+- The webhook acknowledges an update after queuing it durably; alarms process AI work.
+- Recent update IDs are deduplicated. Network/storage failures can still cause at-least-once
+  delivery; exactly-once Telegram messaging is not guaranteed.
+- Image bytes and token-bearing Telegram download URLs are never stored in conversation
+  state or sent as URLs to AI. A queued Telegram file ID is removed after processing.
+- Recognised label/appearance, confirmed name and format are retained for 24 hours after
+  activity, then removed by an alarm. `/new`, `/cancel` and `/start` reset the current product.
+  Provider retention and Cloudflare operational backups follow their own policies.
+- Free usage is subject to Workers, AI and Durable Object quotas. Photos add an AI call.
 
-- SEO-friendly product title
-- Sales description
-- Three key benefits
-- Instagram post
-- Call to action
-- Hashtags
-- SEO keywords
-- Three advertising headlines
+## Update the existing Worker
 
-Users can choose between **Luxury**, **Minimal** and **Sales** tones.
+`wrangler.jsonc` keeps the Worker name `beauty-perfume-ai`. Deploy to the SAME Cloudflare
+account. Existing Telegram/Gemini secrets are preserved. No new provider key is required
+when Workers AI is available.
 
-## User experience
-
-- Polish and English interface
-- Telegram reply keyboards and guided prompts
-- `/start` and `/help` commands
-- Format and tone selection through buttons
-- Automatic return to the main format menu after generation
-- Clear bilingual API and quota error messages
-
-## Architecture
-
-```mermaid
-flowchart LR
-    U[Telegram user] --> T[Telegram Bot API]
-    T -->|Secure webhook| W[Cloudflare Worker]
-    W --> A[Cloudflare Workers AI]
-    W -. Optional fallback .-> G[Google Gemini API]
-    A --> W
-    G --> W
-    W --> T
-```
-
-The original prototype was created as a Make automation. It was later rebuilt as a standalone JavaScript application, so Make and Render are no longer required to keep the bot running.
-
-## Technology
-
-- JavaScript ES modules
-- Cloudflare Workers
-- Cloudflare Workers AI
-- Telegram Bot API
-- Google Gemini API fallback
-- Webhooks and REST APIs
-- Wrangler
-
-## Project structure
-
-```text
-.
-├── src/
-│   └── index.js          # Telegram flow, prompts and AI generation
-├── .dev.vars.example     # Local secret-variable template
-├── .gitignore
-├── package.json
-├── package-lock.json
-└── wrangler.jsonc        # Cloudflare Worker configuration
-```
-
-## Local setup
-
-Requirements:
-
-- Node.js 20 or newer
-- A Cloudflare account with Workers AI access
-- A Telegram bot created through BotFather
-- An optional Gemini API key for fallback generation
-
-Install the dependencies:
-
-```bash
-npm install
-```
-
-Copy `.dev.vars.example` to `.dev.vars` and replace the placeholder values. Never commit `.dev.vars`.
-
-```env
-TELEGRAM_BOT_TOKEN=replace_me
-GEMINI_API_KEY=replace_me
-TELEGRAM_WEBHOOK_SECRET=replace_with_a_long_random_string
-```
-
-Start a local development session:
-
-```bash
-npm run dev
-```
-
-## Cloudflare deployment
-
-Store production credentials as encrypted Cloudflare Worker secrets:
-
-```bash
-npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put GEMINI_API_KEY
-npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
-```
-
-Deploy the Worker:
-
-```bash
+```powershell
+npm ci
+npm run check
+npm test
+npx wrangler login
+npx wrangler deploy --dry-run
 npm run deploy
 ```
 
-The Telegram webhook must target the Worker's `/telegram` route and use the same secret token stored in `TELEGRAM_WEBHOOK_SECRET`.
+Migration `v1-photo-sessions` creates the SQLite Durable Object namespace bound as
+`BOT_SESSIONS`. Keep it in future deployments.
 
-## Security and accuracy
+For a fresh Worker only, use `npx wrangler secret put NAME` to set `TELEGRAM_BOT_TOKEN`
+and `TELEGRAM_WEBHOOK_SECRET`. `GEMINI_API_KEY` remains optional.
 
-- API credentials are stored as Cloudflare secrets and are not part of the repository.
-- The webhook validates Telegram's secret-token header.
-- User input is treated as product data, not as instructions.
-- Generated copy avoids claims about live prices or availability.
-- AI-generated product details should be verified before publication.
-- Telegram HTML output is restricted to supported formatting tags.
+When updating the same Worker URL, keep the existing Telegram webhook.
+Photos are part of `message` updates, so the existing `allowed_updates: ["message"]` is enough.
 
-## Current deployment
+## Validation
 
-The production Worker exposes a small health endpoint at:
+`npm test` runs 21 offline tests with mocked Telegram and AI responses: both operation
+orders, correction/ambiguity, all twelve formats/tones, language changes, photo replacement
+and failure, file bounds, Gemini fallback, user/topic isolation, inbox/restart, deduplication,
+expiry and webhook authentication. These tests do not measure real-photo accuracy.
 
-<https://beauty-perfume-ai.arsenii-beauty-ai.workers.dev/>
+After deployment, check the Worker root for `version: "2.0.0-photo"`, `configured: true`,
+`photoRecognition: true` and `sessions: true`. In Telegram, use `/start`, send a photo,
+confirm and generate a format. Also test another product and an unreadable label.
 
-The endpoint contains no credentials and is separate from the secure Telegram webhook.
+## References
+
+- [Cloudflare Gemma 4 vision support](https://developers.cloudflare.com/workers-ai/models/gemma-4-26b-a4b-it/)
+- [Durable Objects plans and quotas](https://developers.cloudflare.com/durable-objects/platform/pricing/)
+- [Telegram getFile](https://core.telegram.org/bots/api#getfile)
 
