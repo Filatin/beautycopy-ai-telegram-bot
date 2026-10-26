@@ -4,12 +4,30 @@
   "main": "src/index.js",
   "compatibility_date": "2026-08-29",
   "vars": {
-    "GEMINI_MODEL": "gemini-3.5-flash-lite"
+    "GEMINI_MODEL": "gemini-3.5-flash-lite",
+    "VISION_MODEL": "@cf/google/gemma-4-26b-a4b-it"
   },
   "ai": {
     "binding": "AI"
   },
   "observability": {
     "enabled": true
-  }
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BOT_SESSIONS",
+        "class_name": "BotSession"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1-photo-sessions",
+      "new_sqlite_classes": [
+        "BotSession"
+      ]
+    }
+  ]
 }
+
